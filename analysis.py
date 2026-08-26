@@ -3,7 +3,8 @@ Saved queries against oura.db. Add your own as new functions and register
 them in QUERIES, then run:
 
     python analysis.py                  # run everything
-    python analysis.py sleep_vs_readiness   # run just one
+    python analysis.py bedtimes         # run just one
+    python analysis.py daily_sleep daily_readiness   # or a few
 """
 
 import sqlite3
@@ -22,74 +23,111 @@ def q(sql: str) -> pd.DataFrame:
     return df
 
 
-def sleep_score_trend():
-    return q("SELECT day, score AS sleep_score FROM daily_sleep ORDER BY day")
+# --- one query per table: every column, so you can see the full shape of
+# the data available (skips the raw JSON blob columns and the huge
+# per-sample series tables, which are better explored with query.py) ---
+
+def personal_info():
+    return q("SELECT * FROM personal_info")
 
 
-def sleep_vs_readiness():
+def ring_configuration():
+    return q("SELECT * FROM ring_configuration")
+
+
+def daily_sleep():
+    return q("SELECT id, day, score, timestamp, contributors_json FROM daily_sleep ORDER BY day")
+
+
+def daily_readiness():
     return q("""
-        SELECT s.day, s.score AS sleep_score, r.score AS readiness_score
-        FROM daily_sleep s JOIN daily_readiness r ON s.day = r.day
-        ORDER BY s.day
+        SELECT id, day, score, timestamp, temperature_deviation,
+               temperature_trend_deviation, contributors_json
+        FROM daily_readiness ORDER BY day
     """)
 
 
-def resting_hr_and_hrv_trend():
+def daily_activity():
     return q("""
-        SELECT day, lowest_heart_rate, average_hrv
-        FROM sleep_periods
-        WHERE type = 'long_sleep'
-        ORDER BY day
+        SELECT id, day, score, timestamp, steps, active_calories, total_calories,
+               target_calories, equivalent_walking_distance, high_activity_time,
+               medium_activity_time, low_activity_time, sedentary_time, resting_time,
+               non_wear_time, inactivity_alerts, meters_to_target, target_meters,
+               average_met_minutes
+        FROM daily_activity ORDER BY day
     """)
 
 
-def steps_vs_sleep_score():
+def daily_spo2():
+    return q("SELECT id, day, spo2_percentage_avg, breathing_disturbance_index FROM daily_spo2 ORDER BY day")
+
+
+def daily_stress():
+    return q("SELECT id, day, stress_high, recovery_high, day_summary FROM daily_stress ORDER BY day")
+
+
+def daily_resilience():
+    return q("SELECT id, day, level, contributors_json FROM daily_resilience ORDER BY day")
+
+
+def daily_cardiovascular_age():
+    return q("SELECT id, day, vascular_age, pulse_wave_velocity FROM daily_cardiovascular_age ORDER BY day")
+
+
+def sleep_time():
+    return q("SELECT id, day, status, optimal_bedtime_json, recommendation FROM sleep_time ORDER BY day")
+
+
+def sleep_periods():
     return q("""
-        SELECT a.day, a.steps, s.score AS sleep_score
-        FROM daily_activity a JOIN daily_sleep s ON a.day = s.day
-        ORDER BY a.day
+        SELECT id, day, period, type, bedtime_start, bedtime_end, timezone_offset,
+               total_sleep_duration, time_in_bed, awake_time, deep_sleep_duration,
+               light_sleep_duration, rem_sleep_duration, latency, efficiency,
+               restless_periods, average_breath, average_heart_rate, average_hrv,
+               lowest_heart_rate, sleep_score_delta, readiness_score_delta,
+               sleep_algorithm_version, sleep_analysis_reason, low_battery_alert, ring_id
+        FROM sleep_periods ORDER BY day, period
     """)
 
 
-def sleep_stage_minutes():
+def workouts():
+    return q("""
+        SELECT id, day, activity, calories, distance, intensity, label, source,
+               start_datetime, end_datetime
+        FROM workouts ORDER BY day
+    """)
+
+
+# --- the one you asked for: what time you actually went to sleep each night ---
+
+def bedtimes():
+    """Bedtime/wake time for each night's main sleep (excludes naps)."""
     return q("""
         SELECT day,
-               deep_sleep_duration / 60.0 AS deep_min,
-               rem_sleep_duration / 60.0 AS rem_min,
-               light_sleep_duration / 60.0 AS light_min,
-               awake_time / 60.0 AS awake_min
+               substr(bedtime_start, 12, 8) AS bedtime,
+               substr(bedtime_end, 12, 8) AS wake_time,
+               ROUND(total_sleep_duration / 3600.0, 2) AS hours_slept,
+               ROUND(latency / 60.0, 1) AS minutes_to_fall_asleep
         FROM sleep_periods
         WHERE type = 'long_sleep'
         ORDER BY day
     """)
-
-
-def workout_impact_on_next_day_readiness():
-    return q("""
-        SELECT w.day, w.activity, w.intensity, w.calories,
-               r.score AS next_day_readiness
-        FROM workouts w
-        JOIN daily_readiness r ON r.day = date(w.day, '+1 day')
-        ORDER BY w.day
-    """)
-
-
-def best_and_worst_sleep_nights():
-    best = q("SELECT day, score FROM daily_sleep ORDER BY score DESC LIMIT 3")
-    worst = q("SELECT day, score FROM daily_sleep ORDER BY score ASC LIMIT 3")
-    best["kind"] = "best"
-    worst["kind"] = "worst"
-    return pd.concat([best, worst], ignore_index=True)
 
 
 QUERIES = {
-    "sleep_score_trend": sleep_score_trend,
-    "sleep_vs_readiness": sleep_vs_readiness,
-    "resting_hr_and_hrv_trend": resting_hr_and_hrv_trend,
-    "steps_vs_sleep_score": steps_vs_sleep_score,
-    "sleep_stage_minutes": sleep_stage_minutes,
-    "workout_impact_on_next_day_readiness": workout_impact_on_next_day_readiness,
-    "best_and_worst_sleep_nights": best_and_worst_sleep_nights,
+    "personal_info": personal_info,
+    "ring_configuration": ring_configuration,
+    "daily_sleep": daily_sleep,
+    "daily_readiness": daily_readiness,
+    "daily_activity": daily_activity,
+    "daily_spo2": daily_spo2,
+    "daily_stress": daily_stress,
+    "daily_resilience": daily_resilience,
+    "daily_cardiovascular_age": daily_cardiovascular_age,
+    "sleep_time": sleep_time,
+    "sleep_periods": sleep_periods,
+    "workouts": workouts,
+    "bedtimes": bedtimes,
 }
 
 
